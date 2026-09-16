@@ -1,0 +1,42 @@
+name: "🐛 Debug"
+description: "버그 제보 및 수정"
+labels: ["debug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: "📄 버그 설명"
+      description: 발생한 문제와 기대한 동작을 작성해 주세요.
+      placeholder: |
+        발생한 문제:
+        기대한 동작:
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: "🔄 재현 방법"
+      description: 버그가 발생한 환경과 재현 순서를 작성해 주세요. 재현이 어렵다면 확인한 상황을 적어 주세요.
+      placeholder: |
+        환경 (OS, 브라우저, 앱 버전 등):
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    id: tasks
+    attributes:
+      label: "✅ 작업할 내용"
+      description: 버그 해결을 위해 할 일을 체크박스 형태로 작성해 주세요.
+      placeholder: |
+        - [ ] 원인 파악
+        - [ ] 버그 수정
+        - [ ] 재현 시나리오로 수정 확인
+    validations:
+      required: true
+  - type: textarea
+    id: references
+    attributes:
+      label: "🙋🏻 참고 자료"
+      description: 오류 로그, 스크린샷 또는 관련 이슈가 있다면 첨부해 주세요. 민감한 정보는 제외해 주세요.

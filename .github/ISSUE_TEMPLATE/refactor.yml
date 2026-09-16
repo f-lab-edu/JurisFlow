@@ -1,0 +1,36 @@
+name: "♻️ Refactor"
+description: "코드 구조 및 품질 개선"
+labels: ["refactor"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: "📄 설명"
+      description: 리팩터링이 필요한 이유와 개선 목표를 작성해 주세요.
+      placeholder: 현재 코드의 문제점과 개선하려는 구조를 적어 주세요.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: "🎯 변경 범위"
+      description: 변경할 모듈이나 파일, 영향을 받는 기능을 작성해 주세요.
+      placeholder: 변경 대상과 유지되어야 할 기존 동작을 적어 주세요.
+    validations:
+      required: true
+  - type: textarea
+    id: tasks
+    attributes:
+      label: "✅ 작업할 내용"
+      description: 할 일을 체크박스 형태로 작성해 주세요.
+      placeholder: |
+        - [ ] 중복 코드 정리
+        - [ ] 모듈 역할 분리
+        - [ ] 기존 기능이 동일하게 동작하는지 확인
+    validations:
+      required: true
+  - type: textarea
+    id: references
+    attributes:
+      label: "🙋🏻 참고 자료"
+      description: 관련 코드, 설계 문서 또는 참고 자료가 있다면 작성해 주세요.
