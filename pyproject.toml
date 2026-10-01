@@ -1,0 +1,25 @@
+[project]
+name = "jurisflow"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14.5"
+dependencies = [
+    "chromadb>=1.5.9",
+    "fastapi[standard]>=0.142.2",
+    "fastembed>=0.8.1",
+    "filelock>=4.0.7",
+    "pydantic-settings>=2.15.0",
+    "pymupdf>=1.28.2",
+    "pymupdf4llm>=1.28.2",
+    "python-multipart>=0.0.32",
+    "sqlalchemy[asyncio]>=2.1.1",
+    "tokenizers>=0.23.2",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.1.1",
+    "ruff>=0.16.9",
+]
