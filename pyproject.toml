@@ -9,6 +9,7 @@ dependencies = [
     "fastapi[standard]>=0.142.2",
     "fastembed>=0.8.1",
     "filelock>=4.0.7",
+    "psycopg[binary]>=3.2",
     "pydantic-settings>=2.15.0",
     "pymupdf>=1.28.2",
     "pymupdf4llm>=1.28.2",
