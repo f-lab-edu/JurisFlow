@@ -52,3 +52,17 @@ class Settings(BaseSettings):
             path = getattr(self, field)
             setattr(self, field, (ROOT / path).resolve())
         return self
+
+
+class AuthSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="AUTH_",
+        env_file=ROOT / ".env",
+        extra="ignore",
+        hide_input_in_errors=True,
+    )
+
+    jwt_secret: SecretStr = Field(min_length=32)
+    jwt_issuer: str = "jurisflow"
+    access_token_expire_seconds: int = Field(default=3600, ge=1)
+    refresh_token_expire_seconds: int = Field(default=2592000, ge=1)
