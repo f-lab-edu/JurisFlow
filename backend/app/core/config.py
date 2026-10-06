@@ -1,9 +1,31 @@
 from pathlib import Path
 
-from pydantic import Field, model_validator
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT = Path(__file__).resolve().parents[3]
+
+
+class DatabaseSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="DB_",
+        env_file=ROOT / ".env",
+        extra="ignore",
+        hide_input_in_errors=True,
+    )
+
+    host: str = Field(min_length=1)
+    port: int = Field(default=5432, ge=1, le=65535)
+    name: str = Field(default="postgres", min_length=1)
+    user: str = Field(min_length=1)
+    password: SecretStr = Field(min_length=1)
+    sslrootcert: Path = ROOT / "certs/global-bundle.pem"
+    connect_timeout: int = Field(default=10, ge=1)
+
+    @model_validator(mode="after")
+    def resolve_certificate(self):
+        self.sslrootcert = (ROOT / self.sslrootcert.expanduser()).resolve()
+        return self
 
 
 class Settings(BaseSettings):
@@ -30,3 +52,17 @@ class Settings(BaseSettings):
             path = getattr(self, field)
             setattr(self, field, (ROOT / path).resolve())
         return self
+
+
+class AuthSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="AUTH_",
+        env_file=ROOT / ".env",
+        extra="ignore",
+        hide_input_in_errors=True,
+    )
+
+    jwt_secret: SecretStr = Field(min_length=32)
+    jwt_issuer: str = "jurisflow"
+    access_token_expire_seconds: int = Field(default=3600, ge=1)
+    refresh_token_expire_seconds: int = Field(default=2592000, ge=1)
