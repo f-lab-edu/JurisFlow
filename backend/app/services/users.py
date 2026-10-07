@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
 from backend.app.core.config import AuthSettings
-from backend.app.models.users import RefreshToken, User
+from backend.app.models.users import RefreshToken, TokenBlacklist, User
 from backend.app.schemas.users import (
     SignInRequest,
     SignUpData,
@@ -36,6 +36,10 @@ class InvalidCredentialsError(Exception):
 
 
 class AccountInactiveError(Exception):
+    pass
+
+
+class InvalidAccessTokenError(Exception):
     pass
 
 
@@ -122,7 +126,7 @@ async def signin(
             refresh_token=create_refresh_token(session, user.user_id, settings),
             refresh_token_expires_in=settings.refresh_token_expire_seconds,
         )
-    
+
     return result
 
 
@@ -159,3 +163,51 @@ def create_access_token(
         algorithm="HS256",
     )
     return access_token
+
+
+def decode_access_token(token: str, settings: AuthSettings) -> dict:
+    try:
+        if len(token) > 2048:
+            raise InvalidAccessTokenError
+        payload = jwt.decode(
+            token,
+            settings.jwt_secret.get_secret_value(),
+            algorithms=["HS256"],
+            issuer=settings.jwt_issuer,
+            options={"require": ["sub", "iss", "iat", "exp", "jti", "type"]},
+        )
+        if payload["type"] != "access":
+            raise InvalidAccessTokenError
+        UUID(payload["sub"])
+        datetime.fromtimestamp(payload["exp"], tz=seoul_tz)
+        return payload
+    except jwt.InvalidTokenError, ValueError, TypeError, OverflowError, OSError:
+        raise InvalidAccessTokenError from None
+
+
+async def validate_access_token(
+    token: str, session: AsyncSession, settings: AuthSettings
+) -> dict:
+    payload = decode_access_token(token, settings)
+    if await session.get(TokenBlacklist, token) is not None:
+        raise InvalidAccessTokenError
+    return payload
+
+
+async def logout(token: str, session: AsyncSession, settings: AuthSettings) -> None:
+    payload = decode_access_token(token, settings)
+
+    try:
+        async with session.begin_nested():
+            session.add(
+                TokenBlacklist(
+                    token=token,
+                    created_at=datetime.now(seoul_tz),
+                    expires_at=datetime.fromtimestamp(payload["exp"], tz=seoul_tz),
+                )
+            )
+            await session.flush()
+    except IntegrityError:
+        if await session.get(TokenBlacklist, token) is None:
+            raise
+    await session.commit()

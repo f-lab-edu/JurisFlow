@@ -33,3 +33,11 @@ class RefreshToken(Base):
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class TokenBlacklist(Base):
+    __tablename__ = "token_blacklist"
+
+    token: Mapped[str] = mapped_column(String(2048), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
