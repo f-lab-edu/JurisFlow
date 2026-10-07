@@ -55,3 +55,19 @@ class SignUpResponse(ResponseModel):
     success: Literal[True] = True
     data: SignUpData
     meta: ResponseMeta
+
+
+class SignInRequest(BaseModel):
+    email: EmailStr = Field(max_length=254)
+    password: SecretStr = Field(min_length=8, max_length=128)
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str) -> str:
+        return value.lower()
+
+
+class SignInResponse(ResponseModel):
+    success: Literal[True] = True
+    data: TokensResponse
+    meta: ResponseMeta
