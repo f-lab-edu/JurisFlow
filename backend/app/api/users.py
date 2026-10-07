@@ -1,13 +1,12 @@
 import logging
-from functools import lru_cache
 from typing import Annotated
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.app.core.auth import get_access_token, get_auth_settings
 from backend.app.core.config import AuthSettings
 from backend.app.core.database import get_db
 from backend.app.schemas.users import (
@@ -20,21 +19,15 @@ from backend.app.schemas.users import (
 from backend.app.services.users import (
     AccountInactiveError,
     EmailAlreadyExistsError,
+    InvalidAccessTokenError,
     InvalidCredentialsError,
 )
+from backend.app.services.users import logout as invalidate_token
 from backend.app.services.users import signin as authenticate_user
 from backend.app.services.users import signup as create_user
 
 router = APIRouter(prefix="/api/users", tags=["Users"])
 logger = logging.getLogger(__name__)
-
-
-@lru_cache
-def get_auth_settings() -> AuthSettings:
-    try:
-        return AuthSettings()
-    except ValidationError:
-        raise HTTPException(503, "인증 설정을 확인해 주세요.") from None
 
 
 # 회원가입
@@ -91,3 +84,27 @@ async def signin(
         ) from None
     response.headers.update(headers)
     return SignInResponse(data=data, meta=ResponseMeta(request_id=request_id))
+
+# 로그아웃
+@router.post("/signout", status_code=status.HTTP_204_NO_CONTENT)
+async def signout(
+    token: Annotated[str, Depends(get_access_token)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[AuthSettings, Depends(get_auth_settings)],
+) -> Response:
+    try:
+        await invalidate_token(token, session, settings)
+    except InvalidAccessTokenError:
+        raise HTTPException(
+            401,
+            "유효하지 않은 인증 토큰입니다.",
+            headers={"WWW-Authenticate": "Bearer", "Cache-Control": "no-store"},
+        ) from None
+    except SQLAlchemyError:
+        logger.error("Signout database operation failed")
+        raise HTTPException(
+            503,
+            "로그아웃을 처리할 수 없습니다. 잠시 후 다시 시도해 주세요.",
+            headers={"Cache-Control": "no-store"},
+        ) from None
+    return Response(status_code=204, headers={"Cache-Control": "no-store"})
