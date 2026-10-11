@@ -21,6 +21,9 @@ dependencies = [
     "python-multipart>=0.0.32",
     "sqlalchemy[asyncio]>=2.1.1",
     "tokenizers>=0.22,<=0.23.0",
+    "httpx>=0.28,<1",
+    "ddgs>=9,<10",
+    "langgraph-checkpoint-postgres>=3,<4",
 ]
 
 [project.optional-dependencies]
