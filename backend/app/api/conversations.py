@@ -19,6 +19,7 @@ from backend.app.core.auth import get_access_token, get_auth_settings
 from backend.app.core.config import AuthSettings, ChatSettings
 from backend.app.core.database import get_db
 from backend.app.schemas.chat import MessageRequest
+from backend.app.services.auth import decode_access_token
 from backend.app.services.chat_agent import ChatAgent
 from backend.app.services.conversations import (
     ConversationError,
@@ -27,7 +28,6 @@ from backend.app.services.conversations import (
     reserve_message,
 )
 from backend.app.services.llm import ContextTooLong, LLMError, VLLMClient
-from backend.app.services.users import decode_access_token
 
 ERROR_CODES = {
     400: "INVALID_REQUEST",

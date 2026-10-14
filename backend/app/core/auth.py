@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.config import AuthSettings
 from backend.app.core.database import get_db
-from backend.app.services.users import InvalidAccessTokenError, validate_access_token
+from backend.app.services.auth import InvalidAccessTokenError, validate_access_token
 
 bearer = HTTPBearer(auto_error=False)
 
