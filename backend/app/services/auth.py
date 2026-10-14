@@ -5,17 +5,51 @@ from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
 import jwt
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.config import AuthSettings
-from backend.app.models.users import RefreshToken, TokenBlacklist
+from backend.app.models.users import RefreshToken, TokenBlacklist, User
+from backend.app.schemas.auth import RefreshTokenRequest, TokensResponse
 
 seoul_tz = ZoneInfo("Asia/Seoul")
 
 
 class InvalidAccessTokenError(Exception):
     pass
+
+
+class InvalidRefreshTokenError(Exception):
+    pass
+
+
+async def refresh_tokens(
+    request: RefreshTokenRequest, session: AsyncSession, settings: AuthSettings
+) -> TokensResponse:
+    token_hash = hashlib.sha256(request.refresh_token.encode()).hexdigest()
+    async with session.begin():
+        user_id = await session.scalar(
+            delete(RefreshToken)
+            .where(
+                RefreshToken.token_hash == token_hash,
+                RefreshToken.expires_at > datetime.now(seoul_tz),
+                RefreshToken.user_id.in_(
+                    select(User.user_id).where(User.status == "active")
+                ),
+            )
+            .returning(RefreshToken.user_id)
+        )
+        if user_id is None:
+            raise InvalidRefreshTokenError
+
+        result = TokensResponse(
+            access_token=create_access_token(settings, str(user_id)),
+            expires_in=settings.access_token_expire_seconds,
+            refresh_token=create_refresh_token(session, user_id, settings),
+            refresh_token_expires_in=settings.refresh_token_expire_seconds,
+        )
+    return result
 
 
 def create_refresh_token(session: AsyncSession, user_id: UUID, settings: AuthSettings):
