@@ -20,6 +20,10 @@ class InvalidAccessTokenError(Exception):
     pass
 
 
+class ExpiredAccessTokenError(InvalidAccessTokenError):
+    pass
+
+
 class InvalidRefreshTokenError(Exception):
     pass
 
@@ -103,6 +107,8 @@ def decode_access_token(token: str, settings: AuthSettings) -> dict:
         UUID(payload["sub"])
         datetime.fromtimestamp(payload["exp"], tz=seoul_tz)
         return payload
+    except jwt.ExpiredSignatureError:
+        raise ExpiredAccessTokenError from None
     except jwt.InvalidTokenError, ValueError, TypeError, OverflowError, OSError:
         raise InvalidAccessTokenError from None
 

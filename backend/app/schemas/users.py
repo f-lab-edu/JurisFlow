@@ -1,8 +1,16 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, SecretStr, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    SecretStr,
+    field_serializer,
+    field_validator,
+)
 from pydantic.alias_generators import to_camel
 
 from backend.app.schemas.auth import ResponseMeta, TokensResponse
@@ -60,4 +68,32 @@ class SignInRequest(BaseModel):
 class SignInResponse(ResponseModel):
     success: Literal[True] = True
     data: TokensResponse
+    meta: ResponseMeta
+
+
+class MyProfile(ResponseModel):
+    user_id: UUID
+    email: EmailStr
+    name: str
+    status: str
+    terms_agreed: bool | None
+    privacy_agreed: bool | None
+    created_at: datetime
+    updated_at: datetime | None
+
+    @field_serializer("created_at", "updated_at")
+    def serialize_datetime(self, value: datetime | None) -> str | None:
+        if value is None:
+            return None
+        return (
+            value.replace(tzinfo=value.tzinfo or UTC)
+            .astimezone(UTC)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+
+
+class MyProfileResponse(ResponseModel):
+    success: Literal[True] = True
+    data: MyProfile
     meta: ResponseMeta

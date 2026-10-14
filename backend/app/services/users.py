@@ -1,6 +1,6 @@
 import secrets
 from datetime import datetime
-from uuid import uuid4
+from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
 from argon2 import PasswordHasher
@@ -13,13 +13,18 @@ from starlette.concurrency import run_in_threadpool
 from backend.app.core.config import AuthSettings
 from backend.app.models.users import User
 from backend.app.schemas.users import (
+    MyProfile,
     SignInRequest,
     SignUpData,
     SignUpRequest,
     TokensResponse,
     UserResponse,
 )
-from backend.app.services.auth import create_access_token, create_refresh_token
+from backend.app.services.auth import (
+    create_access_token,
+    create_refresh_token,
+    validate_access_token,
+)
 
 password_hasher = PasswordHasher()
 DUMMY_PASSWORD_HASH = password_hasher.hash(secrets.token_urlsafe(32))
@@ -37,6 +42,9 @@ class InvalidCredentialsError(Exception):
 class AccountInactiveError(Exception):
     pass
 
+
+class UserNotFoundError(Exception):
+    pass
 
 async def signup(
     request: SignUpRequest, session: AsyncSession, settings: AuthSettings
@@ -123,3 +131,24 @@ async def signin(
         )
 
     return result
+
+
+
+async def get_my_profile(
+    token: str, session: AsyncSession, settings: AuthSettings
+) -> MyProfile:
+    payload = await validate_access_token(token, session, settings)
+    user = await session.get(User, UUID(payload["sub"]))
+    if user is None or user.status != "active":
+        raise UserNotFoundError
+
+    return MyProfile(
+        user_id=user.user_id,
+        email=user.email,
+        name=user.name,
+        status=user.status,
+        terms_agreed=user.terms_agreed,
+        privacy_agreed=user.privacy_agreed,
+        created_at=user.created_at,
+        updated_at=user.updated_at,
+    )
