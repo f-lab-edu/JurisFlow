@@ -5,6 +5,8 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, SecretStr, field_validator
 from pydantic.alias_generators import to_camel
 
+from backend.app.schemas.auth import ResponseMeta, TokensResponse
+
 
 class SignUpRequest(BaseModel):
     email: EmailStr = Field(max_length=254)
@@ -34,21 +36,9 @@ class UserResponse(ResponseModel):
     created_at: datetime
 
 
-class TokensResponse(ResponseModel):
-    access_token: str
-    token_type: Literal["Bearer"] = "Bearer"
-    expires_in: int
-    refresh_token: str
-    refresh_token_expires_in: int
-
-
 class SignUpData(ResponseModel):
     user: UserResponse
     tokens: TokensResponse
-
-
-class ResponseMeta(ResponseModel):
-    request_id: str
 
 
 class SignUpResponse(ResponseModel):
