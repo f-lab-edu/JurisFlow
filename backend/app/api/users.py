@@ -2,15 +2,26 @@ import logging
 from typing import Annotated
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.core.auth import bearer, get_access_token, get_auth_settings
+from backend.app.core.auth import (
+    bearer,
+    get_access_token,
+    get_auth_settings,
+    get_profile_access_token,
+)
 from backend.app.core.config import AuthSettings
 from backend.app.core.database import get_db
+from backend.app.core.exceptions import (
+    AccountInactiveError,
+    EmailAlreadyExistsError,
+    InvalidCredentialsError,
+    UserNotFoundError,
+)
 from backend.app.schemas.users import (
     MyProfileResponse,
     ResponseMeta,
@@ -18,18 +29,15 @@ from backend.app.schemas.users import (
     SignInResponse,
     SignUpRequest,
     SignUpResponse,
+    UpdateMyProfileRequest,
+    UpdateMyProfileResponse,
 )
 from backend.app.services.auth import ExpiredAccessTokenError, InvalidAccessTokenError
 from backend.app.services.auth import logout as invalidate_token
-from backend.app.services.users import (
-    AccountInactiveError,
-    EmailAlreadyExistsError,
-    InvalidCredentialsError,
-    UserNotFoundError,
-)
 from backend.app.services.users import get_my_profile as fetch_my_profile
 from backend.app.services.users import signin as authenticate_user
 from backend.app.services.users import signup as create_user
+from backend.app.services.users import update_my_profile as modify_my_profile
 
 router = APIRouter(prefix="/api/users", tags=["Users"])
 logger = logging.getLogger(__name__)
@@ -161,3 +169,20 @@ async def get_my_profile(
 
     response.headers.update(headers)
     return MyProfileResponse(data=data, meta=ResponseMeta(request_id=request_id))
+
+
+# 내 회원정보 수정
+@router.patch(
+    "/me", response_model=UpdateMyProfileResponse, status_code=status.HTTP_200_OK
+)
+async def update_my_profile(
+    request: UpdateMyProfileRequest,
+    http_request: Request,
+    token: Annotated[str, Depends(get_profile_access_token)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[AuthSettings, Depends(get_auth_settings)],
+) -> UpdateMyProfileResponse:
+    data = await modify_my_profile(token, request, session, settings)
+    return UpdateMyProfileResponse(
+        data=data, meta=ResponseMeta(request_id=http_request.state.request_id)
+    )

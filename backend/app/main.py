@@ -8,6 +8,8 @@ from backend.app.api.rag import router
 from backend.app.api.users import router as users_router
 from backend.app.core.checkpoints import open_checkpointer
 from backend.app.core.database import dispose_engine
+from backend.app.core.exception_handlers import register_exception_handlers
+from backend.app.core.middleware import RequestIdMiddleware
 
 
 @asynccontextmanager
@@ -21,6 +23,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="JurisFlow", version="0.1.0", lifespan=lifespan)
+register_exception_handlers(app)
+app.add_middleware(RequestIdMiddleware)
 app.include_router(router)
 app.include_router(users_router)
 app.include_router(auth_router)

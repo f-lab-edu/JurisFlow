@@ -97,3 +97,37 @@ class MyProfileResponse(ResponseModel):
     success: Literal[True] = True
     data: MyProfile
     meta: ResponseMeta
+
+
+class UpdateMyProfileRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=100)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def trim_name(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+
+class UpdatedMyProfile(ResponseModel):
+    user_id: UUID
+    email: EmailStr
+    name: str
+    status: Literal["active"]
+    updated_at: datetime
+
+    @field_serializer("updated_at")
+    def serialize_datetime(self, value: datetime) -> str:
+        return (
+            value.replace(tzinfo=value.tzinfo or UTC)
+            .astimezone(UTC)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+
+
+class UpdateMyProfileResponse(ResponseModel):
+    success: Literal[True] = True
+    data: UpdatedMyProfile
+    meta: ResponseMeta

@@ -1,5 +1,5 @@
 import secrets
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
@@ -11,6 +11,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
 from backend.app.core.config import AuthSettings
+from backend.app.core.exceptions import (
+    AccountInactiveError,
+    EmailAlreadyExistsError,
+    InvalidCredentialsError,
+    UserNotFoundError,
+)
 from backend.app.models.users import User
 from backend.app.schemas.users import (
     MyProfile,
@@ -18,6 +24,8 @@ from backend.app.schemas.users import (
     SignUpData,
     SignUpRequest,
     TokensResponse,
+    UpdatedMyProfile,
+    UpdateMyProfileRequest,
     UserResponse,
 )
 from backend.app.services.auth import (
@@ -30,21 +38,6 @@ password_hasher = PasswordHasher()
 DUMMY_PASSWORD_HASH = password_hasher.hash(secrets.token_urlsafe(32))
 seoul_tz = ZoneInfo("Asia/Seoul")
 
-
-class EmailAlreadyExistsError(Exception):
-    pass
-
-
-class InvalidCredentialsError(Exception):
-    pass
-
-
-class AccountInactiveError(Exception):
-    pass
-
-
-class UserNotFoundError(Exception):
-    pass
 
 async def signup(
     request: SignUpRequest, session: AsyncSession, settings: AuthSettings
@@ -133,7 +126,6 @@ async def signin(
     return result
 
 
-
 async def get_my_profile(
     token: str, session: AsyncSession, settings: AuthSettings
 ) -> MyProfile:
@@ -152,3 +144,30 @@ async def get_my_profile(
         created_at=user.created_at,
         updated_at=user.updated_at,
     )
+
+
+async def update_my_profile(
+    token: str,
+    request: UpdateMyProfileRequest,
+    session: AsyncSession,
+    settings: AuthSettings,
+) -> UpdatedMyProfile:
+    async with session.begin():
+        payload = await validate_access_token(token, session, settings)
+        user = await session.scalar(
+            select(User).where(User.user_id == UUID(payload["sub"])).with_for_update()
+        )
+        if user is None or user.status != "active":
+            raise UserNotFoundError
+
+        user.name = request.name
+        user.updated_at = datetime.now(UTC)
+        await session.flush()
+        result = UpdatedMyProfile(
+            user_id=user.user_id,
+            email=user.email,
+            name=user.name,
+            status=user.status,
+            updated_at=user.updated_at,
+        )
+    return result

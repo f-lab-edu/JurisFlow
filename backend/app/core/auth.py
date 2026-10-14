@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.config import AuthSettings
 from backend.app.core.database import get_db
+from backend.app.core.exceptions import MissingAccessTokenError
 from backend.app.services.auth import InvalidAccessTokenError, validate_access_token
 
 bearer = HTTPBearer(auto_error=False)
@@ -41,4 +42,13 @@ async def get_access_token(
         raise HTTPException(
             503, "인증 정보를 확인할 수 없습니다.", headers=headers
         ) from None
+    return credentials.credentials
+
+
+async def get_profile_access_token(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
+) -> str:
+    """Extract the token; the service validates it within its transaction."""
+    if credentials is None:
+        raise MissingAccessTokenError
     return credentials.credentials
