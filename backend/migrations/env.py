@@ -1,13 +1,13 @@
 import asyncio
 from logging.config import fileConfig
 
+from alembic import context
 from sqlalchemy.engine import Connection
 
 from backend.app.core.config import DatabaseSettings
 from backend.app.core.database import create_database_engine
+from backend.app.models import conversations  # noqa: F401
 from backend.app.models.users import Base
-
-from alembic import context
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -30,6 +30,20 @@ target_metadata = Base.metadata
 # ... etc.
 
 
+# LangGraph 테이블은 자체 setup()으로 관리하므로 자동 마이그레이션 대상에서 제외한다.
+def include_object(obj, name, type_, reflected, compare_to):
+    return not (
+        type_ == "table"
+        and name
+        in {
+            "checkpoint_migrations",
+            "checkpoints",
+            "checkpoint_blobs",
+            "checkpoint_writes",
+        }
+    )
+
+
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode.
 
@@ -45,6 +59,7 @@ def run_migrations_offline() -> None:
     context.configure(
         dialect_name="postgresql",
         target_metadata=target_metadata,
+        include_object=include_object,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
     )
@@ -57,8 +72,9 @@ def do_run_migrations(connection: Connection) -> None:
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
+        include_object=include_object,
         compare_type=True,
-        compare_server_default=True
+        compare_server_default=True,
     )
 
     with context.begin_transaction():

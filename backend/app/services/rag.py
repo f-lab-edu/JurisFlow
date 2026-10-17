@@ -158,6 +158,20 @@ class RagService:
             )
         return result
 
+    # 가상 문서를 기존 문서 임베딩 공간으로 변환해 검색
+    def search_hypothetical(
+        self, text: str, limit: int = 5, document_id: str | None = None
+    ):
+        with self._lock:
+            self._initialize()
+            while text and not self._embedder.fits(text):
+                text = text[: len(text) // 2]
+            if not text.strip():
+                raise ValueError("가상 문서가 비어 있습니다.")
+            vector = self._embedder.documents([text])[0]
+            return self._search_vector(vector, limit, document_id)
+
+    # 사용자 검색어를 임베딩하여 관련 문서 청크 찾기
     def search(self, query: str, limit: int = 5, document_id: str | None = None):
         if not query.strip():
             raise ValueError("검색어를 입력하세요.")
@@ -165,18 +179,24 @@ class RagService:
             self._initialize()
             if not self._collection.count():
                 return []
-            result = self._collection.query(
-                query_embeddings=[self._embedder.query(query)],
-                n_results=limit,
-                where={"document_id": document_id} if document_id else None,
-                include=["documents", "metadatas", "distances"],
+            return self._search_vector(self._embedder.query(query), limit, document_id)
+
+    # 문서 범위 필터를 적용해 벡터 유사도 검색 수행
+    def _search_vector(self, vector, limit, document_id):
+        if not self._collection.count():
+            return []
+        result = self._collection.query(
+            query_embeddings=[vector],
+            n_results=limit,
+            where={"document_id": document_id} if document_id else None,
+            include=["documents", "metadatas", "distances"],
+        )
+        return [
+            SearchHit(chunk_id=cid, text=text, metadata=meta, distance=distance)
+            for cid, text, meta, distance in zip(
+                result["ids"][0],
+                result["documents"][0],
+                result["metadatas"][0],
+                result["distances"][0],
             )
-            return [
-                SearchHit(chunk_id=cid, text=text, metadata=meta, distance=distance)
-                for cid, text, meta, distance in zip(
-                    result["ids"][0],
-                    result["documents"][0],
-                    result["metadatas"][0],
-                    result["distances"][0],
-                )
-            ]
+        ]

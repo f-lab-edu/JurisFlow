@@ -66,3 +66,42 @@ class AuthSettings(BaseSettings):
     jwt_issuer: str = "jurisflow"
     access_token_expire_seconds: int = Field(default=3600, ge=1)
     refresh_token_expire_seconds: int = Field(default=2592000, ge=1)
+
+
+class ChatSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="VLLM_",
+        env_file=ROOT / ".env",
+        extra="ignore",
+        hide_input_in_errors=True,
+    )
+
+    base_url: str = "https://fame-heat-motivator.ngrok-free.dev/v1"
+    token: SecretStr = SecretStr("")
+    model: str = "jurisflow"
+    timeout: float = Field(default=60, gt=0, le=120)
+    retries: int = Field(default=2, ge=0, le=3)
+    context_tokens: int = Field(default=4096, ge=2048)
+    max_tokens: int = Field(default=512, ge=128, le=2048)
+    max_steps: int = Field(default=5, ge=1, le=8)
+    max_tool_calls: int = Field(default=3, ge=1, le=5)
+    web_results: int = Field(default=3, ge=1, le=5)
+    web_timeout: int = Field(default=10, ge=1, le=30)
+    request_timeout: int = Field(default=240, ge=10, le=600)
+    tool_mode: str = Field(default="auto", pattern="^(auto|native|json)$")
+
+    @model_validator(mode="after")
+    def validate_chat(self):
+        from urllib.parse import urlsplit
+
+        url = urlsplit(self.base_url)
+        if (
+            url.scheme not in {"http", "https"}
+            or not url.hostname
+            or url.username
+            or url.password
+        ):
+            raise ValueError("VLLM_BASE_URL must be an HTTP(S) URL without credentials")
+        if self.context_tokens <= self.max_tokens + 1024:
+            raise ValueError("VLLM_CONTEXT_TOKENS must reserve space for input")
+        return self
