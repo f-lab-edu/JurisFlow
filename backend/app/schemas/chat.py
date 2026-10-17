@@ -32,6 +32,16 @@ class ConversationRequest(BaseModel):
         return value.strip() if value else value
 
 
+class UpdateTitleRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str = Field(min_length=1, max_length=100)
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def trim_title(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+
 def _utc_iso(value):
     if value.tzinfo is None:
         value = value.replace(tzinfo=UTC)
@@ -74,4 +84,20 @@ class ConversationListData(ResponseModel):
 class ConversationListResponse(ResponseModel):
     success: Literal[True] = True
     data: ConversationListData
+    meta: ResponseMeta
+
+
+class ConversationTitleData(ResponseModel):
+    conversation_id: UUID
+    title: str
+    updated_at: datetime
+
+    @field_serializer("updated_at")
+    def serialize_updated_at(self, value):
+        return _utc_iso(value)
+
+
+class ConversationTitleResponse(ResponseModel):
+    success: Literal[True] = True
+    data: ConversationTitleData
     meta: ResponseMeta
