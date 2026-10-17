@@ -6,7 +6,7 @@ from typing import Annotated
 from uuid import UUID, uuid4
 
 import anyio
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.routing import APIRoute
@@ -29,6 +29,7 @@ from backend.app.services.chat_agent import ChatAgent
 from backend.app.services.conversations import (
     ConversationError,
     complete_message,
+    delete_conversation,
     fail_message,
     list_conversations,
     reserve_message,
@@ -326,3 +327,21 @@ async def patch_conversation_title(
         "data": data,
         "meta": {"requestId": request.state.request_id},
     }
+
+
+# 채팅방을 소프트 삭제
+@router.delete("/{conversation_id}", status_code=204)
+async def remove_conversation(
+    conversation_id: UUID,
+    session: Session,
+    user_id: Annotated[UUID, Depends(current_user)],
+):
+    try:
+        await delete_conversation(session, user_id, conversation_id)
+    except ConversationError as exc:
+        await session.rollback()
+        raise HTTPException(exc.status, exc.detail) from None
+    except SQLAlchemyError:
+        await session.rollback()
+        raise HTTPException(503, "잠시 후 다시 시도해 주세요.") from None
+    return Response(status_code=204)
