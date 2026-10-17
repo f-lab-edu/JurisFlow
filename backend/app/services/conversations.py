@@ -293,6 +293,20 @@ async def fail_message(session, answer_id):
         await session.commit()
 
 
+# 사용자 소유 채팅방의 제목을 수정
+async def update_title(session, user_id, conversation_id, title):
+    await active_user(session, user_id)
+    room = await owned_conversation(session, user_id, conversation_id, lock=True)
+    room.title = title
+    room.updated_at = datetime.now(UTC)
+    await session.commit()
+    return {
+        "conversation_id": room.conversation_id,
+        "title": room.title,
+        "updated_at": room.updated_at,
+    }
+
+
 # 커서는 (updated_at, conversation_id)를 담은 불투명 문자열
 def encode_cursor(room):
     raw = json.dumps([room.updated_at.isoformat(), str(room.conversation_id)])

@@ -18,7 +18,12 @@ from backend.app.api.rag import get_service
 from backend.app.core.auth import get_access_token, get_auth_settings
 from backend.app.core.config import AuthSettings, ChatSettings
 from backend.app.core.database import get_db
-from backend.app.schemas.chat import ConversationListResponse, MessageRequest
+from backend.app.schemas.chat import (
+    ConversationListResponse,
+    ConversationTitleResponse,
+    MessageRequest,
+    UpdateTitleRequest,
+)
 from backend.app.services.auth import decode_access_token
 from backend.app.services.chat_agent import ChatAgent
 from backend.app.services.conversations import (
@@ -27,6 +32,7 @@ from backend.app.services.conversations import (
     fail_message,
     list_conversations,
     reserve_message,
+    update_title,
 )
 from backend.app.services.llm import ContextTooLong, LLMError, VLLMClient
 
@@ -290,6 +296,30 @@ async def get_conversations(
     except ConversationError as exc:
         raise HTTPException(exc.status, exc.detail) from None
     except SQLAlchemyError:
+        raise HTTPException(503, "잠시 후 다시 시도해 주세요.") from None
+    return {
+        "success": True,
+        "data": data,
+        "meta": {"requestId": request.state.request_id},
+    }
+
+
+# 채팅방 제목을 수정
+@router.patch("/{conversation_id}", response_model=ConversationTitleResponse)
+async def patch_conversation_title(
+    conversation_id: UUID,
+    body: UpdateTitleRequest,
+    session: Session,
+    request: Request,
+    user_id: Annotated[UUID, Depends(current_user)],
+):
+    try:
+        data = await update_title(session, user_id, conversation_id, body.title)
+    except ConversationError as exc:
+        await session.rollback()
+        raise HTTPException(exc.status, exc.detail) from None
+    except SQLAlchemyError:
+        await session.rollback()
         raise HTTPException(503, "잠시 후 다시 시도해 주세요.") from None
     return {
         "success": True,
