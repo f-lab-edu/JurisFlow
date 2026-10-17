@@ -16,3 +16,8 @@ class UserNotFoundError(Exception):
 
 class MissingAccessTokenError(Exception):
     pass
+
+
+class WithdrawalRateLimitError(Exception):
+    def __init__(self, retry_after: int):
+        self.retry_after = retry_after

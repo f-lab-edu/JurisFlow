@@ -5,7 +5,6 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 
 class RequestIdMiddleware:
-
     def __init__(self, app: ASGIApp):
         self.app = app
 
@@ -24,9 +23,9 @@ class RequestIdMiddleware:
         async def send_response(message: Message) -> None:
             if (
                 message["type"] == "http.response.start"
-                and scope["method"] == "PATCH"
+                and scope["method"] in {"PATCH", "DELETE"}
                 and scope.get("route") is not None
-                and scope["route"].name == "update_my_profile"
+                and scope["route"].name in {"update_my_profile", "withdraw_my_account"}
             ):
                 response_headers = MutableHeaders(scope=message)
                 response_headers["X-Request-ID"] = request_id

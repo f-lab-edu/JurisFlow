@@ -22,6 +22,7 @@ from backend.app.core.exceptions import (
     InvalidCredentialsError,
     UserNotFoundError,
 )
+from backend.app.core.withdrawal import get_withdrawal_access_token
 from backend.app.schemas.users import (
     MyProfileResponse,
     ResponseMeta,
@@ -31,6 +32,7 @@ from backend.app.schemas.users import (
     SignUpResponse,
     UpdateMyProfileRequest,
     UpdateMyProfileResponse,
+    WithdrawRequest,
 )
 from backend.app.services.auth import ExpiredAccessTokenError, InvalidAccessTokenError
 from backend.app.services.auth import logout as invalidate_token
@@ -38,6 +40,7 @@ from backend.app.services.users import get_my_profile as fetch_my_profile
 from backend.app.services.users import signin as authenticate_user
 from backend.app.services.users import signup as create_user
 from backend.app.services.users import update_my_profile as modify_my_profile
+from backend.app.services.users import withdraw
 
 router = APIRouter(prefix="/api/users", tags=["Users"])
 logger = logging.getLogger(__name__)
@@ -186,3 +189,15 @@ async def update_my_profile(
     return UpdateMyProfileResponse(
         data=data, meta=ResponseMeta(request_id=http_request.state.request_id)
     )
+
+
+# 회원탈퇴
+@router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)
+async def withdraw_my_account(
+    request: WithdrawRequest,
+    token: Annotated[str, Depends(get_withdrawal_access_token)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[AuthSettings, Depends(get_auth_settings)],
+) -> Response:
+    await withdraw(token, request, session, settings)
+    return Response(status_code=204)

@@ -6,6 +6,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Integer,
     String,
     UniqueConstraint,
 )
@@ -29,6 +30,7 @@ class User(Base):
     name: Mapped[str] = mapped_column(String(100))
     status: Mapped[str] = mapped_column(String(20), default="active")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     terms_agreed: Mapped[bool | None] = mapped_column(Boolean)
     privacy_agreed: Mapped[bool | None] = mapped_column(Boolean)
     updated_at: Mapped[datetime | None] = mapped_column(
@@ -55,3 +57,11 @@ class TokenBlacklist(Base):
     token: Mapped[str] = mapped_column(String(2048), primary_key=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class WithdrawalRateLimit(Base):
+    __tablename__ = "withdrawal_rate_limits"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    window_start: Mapped[int] = mapped_column(Integer)
+    attempts: Mapped[int] = mapped_column(Integer)

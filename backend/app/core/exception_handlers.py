@@ -6,18 +6,23 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 
-from backend.app.core.exceptions import MissingAccessTokenError, UserNotFoundError
+from backend.app.core.exceptions import (
+    InvalidCredentialsError,
+    MissingAccessTokenError,
+    UserNotFoundError,
+    WithdrawalRateLimitError,
+)
 from backend.app.services.auth import ExpiredAccessTokenError, InvalidAccessTokenError
 
 logger = logging.getLogger(__name__)
 
 
-def is_profile_update(request: Request) -> bool:
+def is_profile_mutation(request: Request) -> bool:
     route = request.scope.get("route")
     return (
-        request.method == "PATCH"
+        request.method in {"PATCH", "DELETE"}
         and route is not None
-        and route.name == "update_my_profile"
+        and route.name in {"update_my_profile", "withdraw_my_account"}
     )
 
 
@@ -43,10 +48,12 @@ def error_response(
 async def users_validation_exception_handler(
     request: Request, exc: RequestValidationError
 ):
-    if not is_profile_update(request):
+    if not is_profile_mutation(request):
         return await request_validation_exception_handler(request, exc)
     errors = exc.errors()
-    malformed_json = any(e["type"] == "json_invalid" for e in errors)
+    malformed_json = request.method == "DELETE" or any(
+        e["type"] == "json_invalid" for e in errors
+    )
     return error_response(
         request,
         400 if malformed_json else 422,
@@ -61,8 +68,18 @@ async def users_validation_exception_handler(
 
 async def profile_exception_handler(request: Request, exc: Exception):
     # Other endpoints retain their existing local exception handling.
-    if not is_profile_update(request):
+    if not is_profile_mutation(request):
         raise exc
+    if isinstance(exc, WithdrawalRateLimitError):
+        response = error_response(
+            request, 429, "RATE_LIMIT_EXCEEDED", "잠시 후 다시 시도해 주세요."
+        )
+        response.headers["Retry-After"] = str(exc.retry_after)
+        return response
+    if isinstance(exc, InvalidCredentialsError):
+        return error_response(
+            request, 401, "INVALID_CREDENTIALS", "비밀번호가 올바르지 않습니다."
+        )
     if isinstance(exc, MissingAccessTokenError):
         return error_response(request, 401, "INVALID_TOKEN", "인증 토큰이 필요합니다.")
     if isinstance(exc, ExpiredAccessTokenError):
@@ -77,9 +94,9 @@ async def profile_exception_handler(request: Request, exc: Exception):
         return error_response(
             request, 404, "USER_NOT_FOUND", "회원정보를 찾을 수 없습니다."
         )
-    logger.error("Profile update failed; request_id=%s", request.state.request_id)
+    logger.error("Profile mutation failed; request_id=%s", request.state.request_id)
     return error_response(
-        request, 503, "SERVICE_UNAVAILABLE", "회원정보를 수정할 수 없습니다."
+        request, 503, "SERVICE_UNAVAILABLE", "회원 요청을 처리할 수 없습니다."
     )
 
 
@@ -88,6 +105,8 @@ def register_exception_handlers(app: FastAPI) -> None:
         RequestValidationError, users_validation_exception_handler
     )
     for exception in (
+        InvalidCredentialsError,
+        WithdrawalRateLimitError,
         MissingAccessTokenError,
         InvalidAccessTokenError,
         UserNotFoundError,
