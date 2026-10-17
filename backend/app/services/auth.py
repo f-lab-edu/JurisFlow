@@ -20,6 +20,10 @@ class InvalidAccessTokenError(Exception):
     pass
 
 
+class ExpiredAccessTokenError(InvalidAccessTokenError):
+    pass
+
+
 class InvalidRefreshTokenError(Exception):
     pass
 
@@ -29,6 +33,16 @@ async def refresh_tokens(
 ) -> TokensResponse:
     token_hash = hashlib.sha256(request.refresh_token.encode()).hexdigest()
     async with session.begin():
+        owner_id = await session.scalar(
+            select(RefreshToken.user_id).where(RefreshToken.token_hash == token_hash)
+        )
+        if owner_id is None:
+            raise InvalidRefreshTokenError
+        user = await session.scalar(
+            select(User).where(User.user_id == owner_id).with_for_update()
+        )
+        if user is None or user.status != "active" or user.deleted_at is not None:
+            raise InvalidRefreshTokenError
         user_id = await session.scalar(
             delete(RefreshToken)
             .where(
@@ -103,16 +117,32 @@ def decode_access_token(token: str, settings: AuthSettings) -> dict:
         UUID(payload["sub"])
         datetime.fromtimestamp(payload["exp"], tz=seoul_tz)
         return payload
+    except jwt.ExpiredSignatureError:
+        raise ExpiredAccessTokenError from None
     except jwt.InvalidTokenError, ValueError, TypeError, OverflowError, OSError:
         raise InvalidAccessTokenError from None
 
 
 async def validate_access_token(
-    token: str, session: AsyncSession, settings: AuthSettings
+    token: str,
+    session: AsyncSession,
+    settings: AuthSettings,
+    *,
+    check_user: bool = True,
 ) -> dict:
     payload = decode_access_token(token, settings)
     if await session.get(TokenBlacklist, token) is not None:
         raise InvalidAccessTokenError
+    if check_user:
+        state = (
+            await session.execute(
+                select(User.status, User.deleted_at).where(
+                    User.user_id == UUID(payload["sub"])
+                )
+            )
+        ).one_or_none()
+        if state is None or state.status != "active" or state.deleted_at is not None:
+            raise InvalidAccessTokenError
     return payload
 
 

@@ -1,41 +1,43 @@
 import secrets
-from datetime import datetime
-from uuid import uuid4
+from datetime import UTC, datetime
+from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
 from backend.app.core.config import AuthSettings
-from backend.app.models.users import User
+from backend.app.core.exceptions import (
+    AccountInactiveError,
+    EmailAlreadyExistsError,
+    InvalidCredentialsError,
+    UserNotFoundError,
+)
+from backend.app.models.users import RefreshToken, User
 from backend.app.schemas.users import (
+    MyProfile,
     SignInRequest,
     SignUpData,
     SignUpRequest,
     TokensResponse,
+    UpdatedMyProfile,
+    UpdateMyProfileRequest,
     UserResponse,
+    WithdrawRequest,
 )
-from backend.app.services.auth import create_access_token, create_refresh_token
+from backend.app.services.auth import (
+    create_access_token,
+    create_refresh_token,
+    validate_access_token,
+)
 
 password_hasher = PasswordHasher()
 DUMMY_PASSWORD_HASH = password_hasher.hash(secrets.token_urlsafe(32))
 seoul_tz = ZoneInfo("Asia/Seoul")
-
-
-class EmailAlreadyExistsError(Exception):
-    pass
-
-
-class InvalidCredentialsError(Exception):
-    pass
-
-
-class AccountInactiveError(Exception):
-    pass
 
 
 async def signup(
@@ -95,7 +97,9 @@ async def signin(
     request: SignInRequest, session: AsyncSession, settings: AuthSettings
 ) -> TokensResponse:
     async with session.begin():
-        user = await session.scalar(select(User).where(User.email == request.email))
+        user = await session.scalar(
+            select(User).where(User.email == request.email).with_for_update()
+        )
         # Verify a dummy hash as well so unknown emails still incur Argon2 work.
         stored_hash = user.password_hash if user is not None else DUMMY_PASSWORD_HASH
         try:
@@ -107,7 +111,7 @@ async def signin(
 
         if user is None:
             raise InvalidCredentialsError
-        if user.status != "active":
+        if user.status != "active" or user.deleted_at is not None:
             raise AccountInactiveError
 
         if password_hasher.check_needs_rehash(user.password_hash):
@@ -123,3 +127,81 @@ async def signin(
         )
 
     return result
+
+
+async def get_my_profile(
+    token: str, session: AsyncSession, settings: AuthSettings
+) -> MyProfile:
+    payload = await validate_access_token(token, session, settings, check_user=False)
+    user = await session.get(User, UUID(payload["sub"]))
+    if user is None or user.status != "active" or user.deleted_at is not None:
+        raise UserNotFoundError
+
+    return MyProfile(
+        user_id=user.user_id,
+        email=user.email,
+        name=user.name,
+        status=user.status,
+        terms_agreed=user.terms_agreed,
+        privacy_agreed=user.privacy_agreed,
+        created_at=user.created_at,
+        updated_at=user.updated_at,
+    )
+
+
+async def update_my_profile(
+    token: str,
+    request: UpdateMyProfileRequest,
+    session: AsyncSession,
+    settings: AuthSettings,
+) -> UpdatedMyProfile:
+    async with session.begin():
+        payload = await validate_access_token(
+            token, session, settings, check_user=False
+        )
+        user = await session.scalar(
+            select(User).where(User.user_id == UUID(payload["sub"])).with_for_update()
+        )
+        if user is None or user.status != "active" or user.deleted_at is not None:
+            raise UserNotFoundError
+
+        user.name = request.name
+        user.updated_at = datetime.now(UTC)
+        await session.flush()
+        result = UpdatedMyProfile(
+            user_id=user.user_id,
+            email=user.email,
+            name=user.name,
+            status=user.status,
+            updated_at=user.updated_at,
+        )
+    return result
+
+
+async def withdraw(
+    token: str, request: WithdrawRequest, session: AsyncSession, settings: AuthSettings
+) -> None:
+    async with session.begin():
+        payload = await validate_access_token(
+            token, session, settings, check_user=False
+        )
+        user = await session.scalar(
+            select(User).where(User.user_id == UUID(payload["sub"])).with_for_update()
+        )
+        if user is None or user.status != "active" or user.deleted_at is not None:
+            raise UserNotFoundError
+        try:
+            await run_in_threadpool(
+                password_hasher.verify,
+                user.password_hash,
+                request.password.get_secret_value(),
+            )
+        except VerificationError, InvalidHashError:
+            raise InvalidCredentialsError from None
+        now = datetime.now(UTC)
+        user.status = "deleted"
+        user.deleted_at = now
+        user.updated_at = now
+        await session.execute(
+            delete(RefreshToken).where(RefreshToken.user_id == user.user_id)
+        )

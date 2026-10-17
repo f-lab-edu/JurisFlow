@@ -63,6 +63,9 @@ class AuthSettings(BaseSettings):
     )
 
     jwt_secret: SecretStr = Field(min_length=32)
+    withdrawal_rate_limit: int = Field(default=5, ge=1)
+    withdrawal_ip_rate_limit: int = Field(default=30, ge=1)
+    withdrawal_window_seconds: int = Field(default=300, ge=1)
     jwt_issuer: str = "jurisflow"
     access_token_expire_seconds: int = Field(default=3600, ge=1)
     refresh_token_expire_seconds: int = Field(default=2592000, ge=1)
