@@ -6,7 +6,7 @@ from typing import Annotated
 from uuid import UUID, uuid4
 
 import anyio
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.routing import APIRoute
@@ -18,13 +18,14 @@ from backend.app.api.rag import get_service
 from backend.app.core.auth import get_access_token, get_auth_settings
 from backend.app.core.config import AuthSettings, ChatSettings
 from backend.app.core.database import get_db
-from backend.app.schemas.chat import MessageRequest
+from backend.app.schemas.chat import ConversationListResponse, MessageRequest
 from backend.app.services.auth import decode_access_token
 from backend.app.services.chat_agent import ChatAgent
 from backend.app.services.conversations import (
     ConversationError,
     complete_message,
     fail_message,
+    list_conversations,
     reserve_message,
 )
 from backend.app.services.llm import ContextTooLong, LLMError, VLLMClient
@@ -34,6 +35,7 @@ ERROR_CODES = {
     401: "INVALID_TOKEN",
     403: "FORBIDDEN",
     404: "CONVERSATION_NOT_FOUND",
+    429: "RATE_LIMIT_EXCEEDED",
     409: "GENERATION_IN_PROGRESS",
     422: "VALIDATION_ERROR",
     503: "LLM_SERVICE_UNAVAILABLE",
@@ -270,3 +272,27 @@ async def existing_message(
     return await stream_response(
         body, session, user_id, key, agent, request, conversation_id
     )
+
+
+# 채팅방 목록을 최근 수정순으로 조회
+@router.get("", response_model=ConversationListResponse)
+async def get_conversations(
+    session: Session,
+    request: Request,
+    user_id: Annotated[UUID, Depends(current_user)],
+    limit: Annotated[int, Query()] = 20,
+    cursor: Annotated[str | None, Query()] = None,
+):
+    if not 1 <= limit <= 100:
+        raise HTTPException(400, "limit은 1~100 사이여야 합니다.")
+    try:
+        data = await list_conversations(session, user_id, limit, cursor)
+    except ConversationError as exc:
+        raise HTTPException(exc.status, exc.detail) from None
+    except SQLAlchemyError:
+        raise HTTPException(503, "잠시 후 다시 시도해 주세요.") from None
+    return {
+        "success": True,
+        "data": data,
+        "meta": {"requestId": request.state.request_id},
+    }
