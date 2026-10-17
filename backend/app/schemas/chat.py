@@ -1,6 +1,10 @@
+from datetime import UTC, datetime
+from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+
+from backend.app.schemas.auth import ResponseMeta, ResponseModel
 
 
 class MessageRequest(BaseModel):
@@ -26,3 +30,48 @@ class ConversationRequest(BaseModel):
         if value is not None and not value.strip():
             raise ValueError("제목을 입력해 주세요.")
         return value.strip() if value else value
+
+
+def _utc_iso(value):
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+class LastMessage(ResponseModel):
+    role: str
+    content_preview: str
+    created_at: datetime
+
+    @field_serializer("created_at")
+    def serialize_created_at(self, value):
+        return _utc_iso(value)
+
+
+class ConversationItem(ResponseModel):
+    conversation_id: UUID
+    title: str
+    last_message: LastMessage | None
+    created_at: datetime
+    updated_at: datetime
+
+    @field_serializer("created_at", "updated_at")
+    def serialize_times(self, value):
+        return _utc_iso(value)
+
+
+class PageInfo(ResponseModel):
+    next_cursor: str | None
+    has_next: bool
+    limit: int
+
+
+class ConversationListData(ResponseModel):
+    items: list[ConversationItem]
+    page: PageInfo
+
+
+class ConversationListResponse(ResponseModel):
+    success: Literal[True] = True
+    data: ConversationListData
+    meta: ResponseMeta

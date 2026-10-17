@@ -18,6 +18,9 @@ from backend.app.models.users import Base
 
 class Conversation(Base):
     __tablename__ = "conversations"
+    __table_args__ = (
+        Index("ix_conversations_list", "user_id", "updated_at", "conversation_id"),
+    )
     conversation_id: Mapped[UUID] = mapped_column(primary_key=True)
     user_id: Mapped[UUID] = mapped_column(ForeignKey("users.user_id"), index=True)
     title: Mapped[str] = mapped_column(String(100))
@@ -30,6 +33,7 @@ class Message(Base):
     __tablename__ = "messages"
     __table_args__ = (
         UniqueConstraint("user_id", "idempotency_key", name="uq_messages_idempotency"),
+        Index("ix_messages_conversation_created", "conversation_id", "created_at"),
         Index(
             "uq_messages_active",
             "conversation_id",

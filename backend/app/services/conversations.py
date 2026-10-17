@@ -1,10 +1,11 @@
 import asyncio
+import base64
 import hashlib
 import json
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, tuple_, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
 
@@ -290,3 +291,87 @@ async def fail_message(session, answer_id):
             run.status = "retryable"
             run.updated_at = stored.updated_at
         await session.commit()
+
+
+# 커서는 (updated_at, conversation_id)를 담은 불투명 문자열
+def encode_cursor(room):
+    raw = json.dumps([room.updated_at.isoformat(), str(room.conversation_id)])
+    return base64.urlsafe_b64encode(raw.encode()).decode()
+
+
+def decode_cursor(cursor):
+    try:
+        updated_at, conversation_id = json.loads(base64.urlsafe_b64decode(cursor))
+        updated_at = datetime.fromisoformat(updated_at)
+        if updated_at.tzinfo is None:
+            updated_at = updated_at.replace(tzinfo=UTC)
+        return updated_at, UUID(conversation_id)
+    except ValueError, TypeError:
+        raise ConversationError(400, "cursor가 올바르지 않습니다.") from None
+
+
+# 최근 수정순으로 채팅방 목록을 커서 기반으로 조회
+async def list_conversations(session, user_id, limit, cursor=None):
+    statement = select(Conversation).where(
+        Conversation.user_id == user_id, Conversation.deleted_at.is_(None)
+    )
+    if cursor:
+        statement = statement.where(
+            tuple_(Conversation.updated_at, Conversation.conversation_id)
+            < tuple_(*decode_cursor(cursor))
+        )
+    rooms = list(
+        await session.scalars(
+            statement.order_by(
+                Conversation.updated_at.desc(), Conversation.conversation_id.desc()
+            ).limit(limit + 1)
+        )
+    )
+    has_next = len(rooms) > limit
+    rooms = rooms[:limit]
+
+    last_messages = {}
+    if rooms:
+        ranked = (
+            select(
+                Message.conversation_id,
+                Message.role,
+                Message.content,
+                Message.created_at,
+                func.row_number()
+                .over(
+                    partition_by=Message.conversation_id,
+                    order_by=(Message.created_at.desc(), Message.message_id.desc()),
+                )
+                .label("rank"),
+            )
+            .where(Message.conversation_id.in_([r.conversation_id for r in rooms]))
+            .subquery()
+        )
+        rows = await session.execute(select(ranked).where(ranked.c.rank == 1))
+        last_messages = {
+            row.conversation_id: {
+                "role": row.role,
+                "content_preview": row.content[:100],
+                "created_at": row.created_at,
+            }
+            for row in rows
+        }
+
+    return {
+        "items": [
+            {
+                "conversation_id": room.conversation_id,
+                "title": room.title,
+                "last_message": last_messages.get(room.conversation_id),
+                "created_at": room.created_at,
+                "updated_at": room.updated_at,
+            }
+            for room in rooms
+        ],
+        "page": {
+            "next_cursor": encode_cursor(rooms[-1]) if has_next else None,
+            "has_next": has_next,
+            "limit": limit,
+        },
+    }
