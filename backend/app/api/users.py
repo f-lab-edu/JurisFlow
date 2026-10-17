@@ -16,13 +16,13 @@ from backend.app.schemas.users import (
     SignUpRequest,
     SignUpResponse,
 )
+from backend.app.services.auth import InvalidAccessTokenError
+from backend.app.services.auth import logout as invalidate_token
 from backend.app.services.users import (
     AccountInactiveError,
     EmailAlreadyExistsError,
-    InvalidAccessTokenError,
     InvalidCredentialsError,
 )
-from backend.app.services.users import logout as invalidate_token
 from backend.app.services.users import signin as authenticate_user
 from backend.app.services.users import signup as create_user
 
