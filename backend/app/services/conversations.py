@@ -307,6 +307,30 @@ async def update_title(session, user_id, conversation_id, title):
     }
 
 
+# 사용자 소유 채팅방을 소프트 삭제. 답변 생성 중이면 거부
+async def delete_conversation(session, user_id, conversation_id):
+    await active_user(session, user_id)
+    room = await owned_conversation(session, user_id, conversation_id, lock=True)
+    generating = await session.scalar(
+        select(ConversationRun.assistant_message_id)
+        .where(
+            ConversationRun.conversation_id == room.conversation_id,
+            ConversationRun.status != "completed",
+        )
+        .union(
+            select(Message.message_id).where(
+                Message.conversation_id == room.conversation_id,
+                Message.status == "streaming",
+            )
+        )
+        .limit(1)
+    )
+    if generating is not None:
+        raise ConversationError(409, "답변 생성 중에는 삭제할 수 없습니다.")
+    room.deleted_at = datetime.now(UTC)
+    await session.commit()
+
+
 # 커서는 (updated_at, conversation_id)를 담은 불투명 문자열
 def encode_cursor(room):
     raw = json.dumps([room.updated_at.isoformat(), str(room.conversation_id)])
