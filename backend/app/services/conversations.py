@@ -5,7 +5,7 @@ import json
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, select, tuple_, update
+from sqlalchemy import case, func, select, tuple_, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
 
@@ -485,6 +485,76 @@ async def list_conversations(session, user_id, limit, cursor=None):
         ],
         "page": {
             "next_cursor": encode_cursor(rooms[-1]) if has_next else None,
+            "has_next": has_next,
+            "limit": limit,
+        },
+    }
+
+
+# 같은 시각에 저장된 질문이 답변보다 먼저 오도록 정렬 순위를 부여
+MESSAGE_RANK = case((Message.role == "user", 0), else_=1)
+
+
+# 커서는 (created_at, 순위, message_id)를 담은 불투명 문자열
+def encode_message_cursor(message, rank):
+    raw = json.dumps([message.created_at.isoformat(), rank, str(message.message_id)])
+    return base64.urlsafe_b64encode(raw.encode()).decode()
+
+
+def decode_message_cursor(cursor):
+    try:
+        created_at, rank, message_id = json.loads(base64.urlsafe_b64decode(cursor))
+        created_at = datetime.fromisoformat(created_at)
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=UTC)
+        if rank not in (0, 1):
+            raise ValueError
+        return created_at, rank, UUID(message_id)
+    except ValueError, TypeError:
+        raise ConversationError(400, "cursor가 올바르지 않습니다.") from None
+
+
+# 채팅방의 메시지를 오래된 순으로 커서 기반 조회
+async def list_messages(session, user_id, conversation_id, limit, cursor=None):
+    await active_user(session, user_id)
+    await owned_conversation(session, user_id, conversation_id)
+    statement = select(Message).where(
+        Message.conversation_id == conversation_id, Message.user_id == user_id
+    )
+    if cursor:
+        statement = statement.where(
+            tuple_(Message.created_at, MESSAGE_RANK, Message.message_id)
+            > tuple_(*decode_message_cursor(cursor))
+        )
+    messages = list(
+        await session.scalars(
+            statement.order_by(
+                Message.created_at, MESSAGE_RANK, Message.message_id
+            ).limit(limit + 1)
+        )
+    )
+    has_next = len(messages) > limit
+    messages = messages[:limit]
+    last = messages[-1] if messages else None
+    return {
+        "items": [
+            {
+                "message_id": message.message_id,
+                "conversation_id": message.conversation_id,
+                "role": message.role,
+                "content": message.content,
+                "status": message.status,
+                "parent_message_id": message.parent_message_id,
+                "created_at": message.created_at,
+            }
+            for message in messages
+        ],
+        "page": {
+            "next_cursor": (
+                encode_message_cursor(last, 0 if last.role == "user" else 1)
+                if has_next
+                else None
+            ),
             "has_next": has_next,
             "limit": limit,
         },
