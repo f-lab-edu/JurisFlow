@@ -14,9 +14,19 @@ from backend.app.models.users import User
 
 
 class ConversationError(Exception):
-    def __init__(self, status, detail):
-        self.status, self.detail = status, detail
+    def __init__(self, status, detail, code=None):
+        self.status, self.detail, self.code = status, detail, code
         super().__init__(detail)
+
+
+# 진행 중인 답변 생성 작업. 중단 요청이 다른 요청에서 들어오므로 메모리에 보관(단일 워커 전제)
+class Generation:
+    def __init__(self, task):
+        self.task = task
+        self.stopped = False
+
+
+GENERATIONS: dict[UUID, Generation] = {}
 
 
 # 체크포인트가 없는 기존 채팅방의 최근 3턴을 최초 한 번 불러오기
@@ -95,7 +105,7 @@ async def replay(session, existing, fingerprint):
     )
     if answer is None:
         raise ConversationError(409, "기존 요청의 답변 기록을 확인할 수 없습니다.")
-    if answer.status == "completed":
+    if answer.status in ("completed", "stopped"):
         return {"question": existing, "answer": answer, "replay": True}
     run = await session.get(ConversationRun, answer.message_id, populate_existing=True)
     if run is None:
@@ -274,9 +284,75 @@ async def complete_message(session, reserved, agent):
         await session.commit()
     except BaseException:
         await session.rollback()
-        await asyncio.shield(fail_message(session, answer_id))
+        generation = GENERATIONS.get(answer_id)
+        if generation is not None and generation.stopped:
+            await asyncio.shield(stop_message(session, answer_id))
+        else:
+            await asyncio.shield(fail_message(session, answer_id))
         raise
     return answer
+
+
+# 사용자가 중단한 답변을 stopped 상태로 마감. 다음 메시지를 보낼 수 있도록 실행은 완료 처리
+async def stop_message(session, answer_id):
+    stored = await session.get(Message, answer_id, populate_existing=True)
+    if stored is not None and stored.status == "streaming":
+        stored.status = "stopped"
+        stored.finish_reason = "user_cancelled"
+        stored.updated_at = datetime.now(UTC)
+        run = await session.get(ConversationRun, answer_id)
+        if run is not None:
+            run.status = "completed"
+            run.updated_at = stored.updated_at
+        room = await session.get(Conversation, stored.conversation_id)
+        if room is not None:
+            room.updated_at = stored.updated_at
+        await session.commit()
+    return stored
+
+
+# 진행 중인 답변 생성을 중단하고 stopped 상태로 저장
+async def stop_generation(session, user_id, conversation_id, assistant_message_id):
+    await active_user(session, user_id)
+    await owned_conversation(session, user_id, conversation_id)
+    answer = await session.scalar(
+        select(Message)
+        .where(
+            Message.message_id == assistant_message_id,
+            Message.conversation_id == conversation_id,
+            Message.user_id == user_id,
+            Message.role == "assistant",
+        )
+        .execution_options(populate_existing=True)
+    )
+    if answer is None:
+        raise ConversationError(404, "메시지를 찾을 수 없습니다.", "MESSAGE_NOT_FOUND")
+    if answer.status != "streaming":
+        raise ConversationError(409, "생성 중인 답변이 아닙니다.", "INVALID_REQUEST")
+    # 읽기 트랜잭션을 닫아 생성 작업의 커밋을 막지 않도록 함
+    await session.rollback()
+    generation = GENERATIONS.get(assistant_message_id)
+    if generation is None:
+        # 이 프로세스에서 실행 중이 아닌 만료된 예약
+        stored = await stop_message(session, assistant_message_id)
+    else:
+        if generation.task.done():
+            raise ConversationError(
+                409, "생성 중인 답변이 아닙니다.", "INVALID_REQUEST"
+            )
+        generation.stopped = True
+        generation.task.cancel()
+        await asyncio.wait({generation.task})
+        stored = await session.get(
+            Message, assistant_message_id, populate_existing=True
+        )
+    if stored is None or stored.status != "stopped":
+        raise ConversationError(409, "생성 중인 답변이 아닙니다.", "INVALID_REQUEST")
+    return {
+        "message_id": stored.message_id,
+        "status": stored.status,
+        "stopped_at": stored.updated_at,
+    }
 
 
 # 실패한 답변의 생성 예약을 해제

@@ -101,3 +101,19 @@ class ConversationTitleResponse(ResponseModel):
     success: Literal[True] = True
     data: ConversationTitleData
     meta: ResponseMeta
+
+
+class StopGenerationData(ResponseModel):
+    message_id: UUID
+    status: Literal["stopped"]
+    stopped_at: datetime
+
+    @field_serializer("stopped_at")
+    def serialize_stopped_at(self, value):
+        return _utc_iso(value)
+
+
+class StopGenerationResponse(ResponseModel):
+    success: Literal[True] = True
+    data: StopGenerationData
+    meta: ResponseMeta

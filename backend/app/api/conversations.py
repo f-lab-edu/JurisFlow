@@ -22,17 +22,21 @@ from backend.app.schemas.chat import (
     ConversationListResponse,
     ConversationTitleResponse,
     MessageRequest,
+    StopGenerationResponse,
     UpdateTitleRequest,
 )
 from backend.app.services.auth import decode_access_token
 from backend.app.services.chat_agent import ChatAgent
 from backend.app.services.conversations import (
+    GENERATIONS,
     ConversationError,
+    Generation,
     complete_message,
     delete_conversation,
     fail_message,
     list_conversations,
     reserve_message,
+    stop_generation,
     update_title,
 )
 from backend.app.services.llm import ContextTooLong, LLMError, VLLMClient
@@ -47,6 +51,13 @@ ERROR_CODES = {
     422: "VALIDATION_ERROR",
     503: "LLM_SERVICE_UNAVAILABLE",
 }
+
+
+# 서비스 오류 코드를 응답에 그대로 쓰기 위한 예외
+class CodedHTTPException(HTTPException):
+    def __init__(self, status_code, detail, code):
+        super().__init__(status_code, detail)
+        self.code = code
 
 
 def error_body(code, message, request_id, details=None):
@@ -101,7 +112,8 @@ class ChatRoute(APIRoute):
                 headers.update(exc.headers or {})
                 return JSONResponse(
                     error_body(
-                        ERROR_CODES.get(exc.status_code, "INTERNAL_SERVER_ERROR"),
+                        getattr(exc, "code", None)
+                        or ERROR_CODES.get(exc.status_code, "INTERNAL_SERVER_ERROR"),
                         str(exc.detail),
                         request_id,
                     ),
@@ -182,10 +194,22 @@ async def stream_response(
             yield event("message_start", start)
             if not reserved["replay"]:
                 work = asyncio.create_task(complete_message(session, reserved, agent))
+                generation = GENERATIONS[answer.message_id] = Generation(work)
                 while not work.done():
                     done, _ = await asyncio.wait({work}, timeout=10)
                     if not done:
                         yield ": keep-alive\n\n"
+                if work.cancelled() and generation.stopped:
+                    yield event(
+                        "message_complete",
+                        {
+                            "messageId": answer_id,
+                            "status": "stopped",
+                            "finishReason": "user_cancelled",
+                            "usage": None,
+                        },
+                    )
+                    return
                 final = await work
             else:
                 final = answer
@@ -202,7 +226,7 @@ async def stream_response(
                 "message_complete",
                 {
                     "messageId": answer_id,
-                    "status": "completed",
+                    "status": final.status,
                     "finishReason": final.finish_reason,
                     "usage": final.usage,
                 },
@@ -231,6 +255,7 @@ async def stream_response(
                 ),
             )
         finally:
+            GENERATIONS.pop(answer.message_id, None)
             with anyio.CancelScope(shield=True):
                 if work is not None and not work.done():
                     work.cancel()
@@ -345,3 +370,34 @@ async def remove_conversation(
         await session.rollback()
         raise HTTPException(503, "잠시 후 다시 시도해 주세요.") from None
     return Response(status_code=204)
+
+
+# 진행 중인 AI 답변 생성을 중단
+@router.delete(
+    "/{conversation_id}/generations/{assistant_message_id}",
+    response_model=StopGenerationResponse,
+)
+async def stop_message_generation(
+    conversation_id: UUID,
+    assistant_message_id: UUID,
+    session: Session,
+    request: Request,
+    user_id: Annotated[UUID, Depends(current_user)],
+):
+    try:
+        data = await stop_generation(
+            session, user_id, conversation_id, assistant_message_id
+        )
+    except ConversationError as exc:
+        await session.rollback()
+        if exc.code:
+            raise CodedHTTPException(exc.status, exc.detail, exc.code) from None
+        raise HTTPException(exc.status, exc.detail) from None
+    except SQLAlchemyError:
+        await session.rollback()
+        raise HTTPException(503, "잠시 후 다시 시도해 주세요.") from None
+    return {
+        "success": True,
+        "data": data,
+        "meta": {"requestId": request.state.request_id},
+    }
