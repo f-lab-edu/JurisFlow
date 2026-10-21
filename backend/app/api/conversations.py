@@ -21,6 +21,7 @@ from backend.app.core.database import get_db
 from backend.app.schemas.chat import (
     ConversationListResponse,
     ConversationTitleResponse,
+    MessageListResponse,
     MessageRequest,
     StopGenerationResponse,
     UpdateTitleRequest,
@@ -35,6 +36,7 @@ from backend.app.services.conversations import (
     delete_conversation,
     fail_message,
     list_conversations,
+    list_messages,
     reserve_message,
     stop_generation,
     update_title,
@@ -319,6 +321,31 @@ async def get_conversations(
         raise HTTPException(400, "limit은 1~100 사이여야 합니다.")
     try:
         data = await list_conversations(session, user_id, limit, cursor)
+    except ConversationError as exc:
+        raise HTTPException(exc.status, exc.detail) from None
+    except SQLAlchemyError:
+        raise HTTPException(503, "잠시 후 다시 시도해 주세요.") from None
+    return {
+        "success": True,
+        "data": data,
+        "meta": {"requestId": request.state.request_id},
+    }
+
+
+# 채팅방의 메시지 기록을 오래된 순으로 조회
+@router.get("/{conversation_id}/messages", response_model=MessageListResponse)
+async def get_messages(
+    conversation_id: UUID,
+    session: Session,
+    request: Request,
+    user_id: Annotated[UUID, Depends(current_user)],
+    limit: Annotated[int, Query()] = 50,
+    cursor: Annotated[str | None, Query()] = None,
+):
+    if not 1 <= limit <= 100:
+        raise HTTPException(400, "limit은 1~100 사이여야 합니다.")
+    try:
+        data = await list_messages(session, user_id, conversation_id, limit, cursor)
     except ConversationError as exc:
         raise HTTPException(exc.status, exc.detail) from None
     except SQLAlchemyError:

@@ -87,6 +87,31 @@ class ConversationListResponse(ResponseModel):
     meta: ResponseMeta
 
 
+class MessageItem(ResponseModel):
+    message_id: UUID
+    conversation_id: UUID
+    role: str
+    content: str
+    status: str
+    parent_message_id: UUID | None
+    created_at: datetime
+
+    @field_serializer("created_at")
+    def serialize_created_at(self, value):
+        return _utc_iso(value)
+
+
+class MessageListData(ResponseModel):
+    items: list[MessageItem]
+    page: PageInfo
+
+
+class MessageListResponse(ResponseModel):
+    success: Literal[True] = True
+    data: MessageListData
+    meta: ResponseMeta
+
+
 class ConversationTitleData(ResponseModel):
     conversation_id: UUID
     title: str
